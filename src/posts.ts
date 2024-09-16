@@ -1,7 +1,7 @@
-import { readdir } from "fs/promises";
+import { readdir, readFile } from "fs/promises";
 import path from "path";
 import { type Category } from "./categories";
-
+import grayMatter from "gray-matter";
 export interface Post {
   slug: string;
   title: string;
@@ -13,39 +13,50 @@ export interface Post {
   blogThumb: string;
   featuredImage: string;
 }
-
 export const postsPerPage = 3 as const;
-
-async function loadMDXFile(slug: string): Promise<{ metadata: Post }> {
+async function loadMDXFile(slug: string): Promise<Post> {
   try {
-    const { metadata } = await import(`./app/(group-1)/blog/(posts)/${slug}/page.mdx`);
-    return { metadata };
+    const file= await readFile(path.join(process.cwd(),`src/(posts)/${slug}`), 'utf8');
+    const {data} = grayMatter(file)
+    return  {
+      title: data.title, 
+      slug: slug.replace('.mdx',''),
+      publishDate: data.publishDate,
+      excerpt: data.excerpt,
+      categories: data.categories,
+      tags: data.tags,
+      author: data.author,
+      blogThumb: data.blogThumb,
+      featuredImage: data.featuredImage,
+    };
   } catch (error) {
     console.error(`Failed to load MDX file for slug: ${slug}`, error);
-    return { metadata: {} as Post }; // Return a default empty object or handle error accordingly
+    return {} as Post; // Return a default empty object or handle error accordingly
   }
 }
 
 export async function getPosts(): Promise<Post[]> {
-  // Retrieve slugs from post directories
-  const postsDir = path.join(process.cwd(), 'src/app/(group-1)/blog/(posts)');
-  const slugs = (
-    await readdir(postsDir, { withFileTypes: true })
-  ).filter((dirent) => dirent.isDirectory())
-    .map((dirent) => dirent.name);
+  try {
+    
+    // Retrieve files from posts directory
+    const filenames = await readdir(path.join(process.cwd(), "src/(posts)"));
+    
+    // Retrieve metadata from MDX files
+    const posts = await Promise.all(
+      filenames.filter(name=>name.endsWith('.mdx')).map(async (file) => {
+        const metadata = await loadMDXFile(file);
+        return metadata ;
+      })
+    );
 
-  // Retrieve metadata from MDX files
-  const posts = await Promise.all(
-    slugs.map(async (slug) => {
-      const { metadata } = await loadMDXFile(slug);
-      return { ...metadata, slug }; // Ensure slug is placed after spreading metadata
-    })
-  );
+    // Sort posts from newest to oldest
+    posts.sort((a, b) => +new Date(b.publishDate) - +new Date(a.publishDate));
 
-  // Sort posts from newest to oldest
-  posts.sort((a, b) => +new Date(b.publishDate) - +new Date(a.publishDate));
-
-  return posts;
+    return posts;
+  } catch (err: any) {
+    console.error(err.message);
+    return [];
+  }
 }
 
 export async function getPostsByCategory({
@@ -56,9 +67,7 @@ export async function getPostsByCategory({
   const allPosts = await getPosts();
 
   // Filter posts by specified category
-  const posts = allPosts.filter(
-    (post) => post.categories.includes(category)
-  );
+  const posts = allPosts.filter((post) => post.categories.includes(category));
 
   return posts;
 }
@@ -103,5 +112,3 @@ export async function getPaginatedPostsByCategory({
     total: allCategoryPosts.length,
   };
 }
-
- 
